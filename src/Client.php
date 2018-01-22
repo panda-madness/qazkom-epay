@@ -108,87 +108,6 @@ class Client
     }
 
     /**
-     * Создаёт подписанный XML-запрос.
-     *
-     * @param integer $orderId
-     * @param integer $currencyCode
-     * @param integer $amount
-     * @param boolean $base64encode
-     * @return string
-     * @throws Amount\EmptyAmount
-     * @throws Certificate\UnknownError
-     * @throws Common\FileNotFound
-     * @throws Currency\EmptyId
-     * @throws Currency\InvalidId
-     * @throws Order\EmptyId
-     * @throws Order\NotNumeric
-     * @throws Order\NullId
-     */
-    public function processRequest($orderId, $currencyCode, $amount, $phone = null, $base64encode = true)
-    {
-        switch (true) {
-            case strlen($orderId) < 1:
-                throw new Order\EmptyId();
-                break;
-
-            case !is_numeric($orderId):
-                throw new Order\NotNumeric();
-                break;
-
-            case $orderId < 1:
-                throw new Order\NullId();
-                break;
-
-            case empty($currencyCode):
-                throw new Currency\EmptyId();
-                break;
-
-            case !array_key_exists($currencyCode, $this->currencyEnum):
-                throw new Currency\InvalidId();
-                break;
-
-            case $amount == 0:
-                throw new Amount\EmptyAmount();
-                break;
-
-            case strlen($this->config['PRIVATE_KEY_FN']) == 0:
-                throw new Certificate\UnknownError('Path for Private key not found');
-                break;
-
-            case strlen($this->config['XML_TEMPLATE_FN']) == 0:
-                throw new Certificate\UnknownError('Path for Private key not found');
-                break;
-        }
-
-        $request = array(
-            'MERCHANT_CERTIFICATE_ID' => $this->config['MERCHANT_CERTIFICATE_ID'],
-            'MERCHANT_NAME'           => $this->config['MERCHANT_NAME'],
-            'ORDER_ID'                => sprintf('%06d', $orderId),
-            'CURRENCY'                => $currencyCode,
-            'MERCHANT_ID'             => $this->config['MERCHANT_ID'],
-            'AMOUNT'                  => $amount,
-            'PHONE'                   => $phone
-        );
-
-        $request = $this->processXml($this->config['XML_TEMPLATE_FN'], $request);
-        $sign    = new Sign($this->config);
-        $sign->setInvert(true);
-
-        $xml = sprintf(
-            '<document>%s<merchant_sign type="RSA" cert_id="%s">%s</merchant_sign></document>',
-            $request,
-            $this->config['MERCHANT_CERTIFICATE_ID'],
-            $sign->sign64($request)
-        );
-
-        if ($base64encode) {
-            $xml = base64_encode($xml);
-        }
-
-        return $xml;
-    }
-
-    /**
      * Создаёт подписанное XML-подтверждение.
      *
      * @param  string $reference
@@ -203,6 +122,7 @@ class Client
      * @throws Order\EmptyId
      * @throws Order\NotNumeric
      * @throws Order\NullId
+     * @throws \Epay\Exceptions\Common\FileNotFound
      */
     public function processConfirmation(
         $reference,
@@ -251,6 +171,50 @@ class Client
 
         $request = $this->processXml($this->config['XML_TEMPLATE_CONFIRM_FN'], $request);
         $sign    = new Sign($this->config);
+        $sign->setInvert(true);
+
+        $xml = sprintf(
+            '<document>%s<merchant_sign type="RSA" cert_id="%s">%s</merchant_sign></document>',
+            $request,
+            $this->config['MERCHANT_CERTIFICATE_ID'],
+            $sign->sign64($request)
+        );
+
+        if ($base64encode) {
+            $xml = base64_encode($xml);
+        }
+
+        return $xml;
+    }
+
+    /**
+     * Создаёт подписанный XML-запрос.
+     * @param array $request
+     * @param boolean $base64encode
+     * @return string
+     * @throws \Epay\Exceptions\Common\FileNotFound
+     */
+    public function processRequest($request, $base64encode = true)
+    {
+        array_map(function($key) use($request) {
+            if(! array_key_exists($key, $request)) {
+                throw new \InvalidArgumentException("${key} is not set on the request");
+            }
+        }, ['ORDER_ID', 'CURRENCY', 'AMOUNT']);
+
+        $config = [
+            'MERCHANT_CERTIFICATE_ID' => $this->config['MERCHANT_CERTIFICATE_ID'],
+            'MERCHANT_NAME'           => $this->config['MERCHANT_NAME'],
+            'MERCHANT_ID'             => $this->config['MERCHANT_ID'],
+        ];
+
+        $request['ORDER_ID'] = sprintf('%06d', $request['ORDER_ID']);
+
+        $request = array_merge($request, $config);
+
+        $request = $this->processXml($this->config['XML_TEMPLATE_FN'], $request);
+
+        $sign = new Sign($this->config);
         $sign->setInvert(true);
 
         $xml = sprintf(
